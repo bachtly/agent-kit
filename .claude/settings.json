@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m unittest discover -s router -v)",
+      "Bash(python -m unittest:*)",
+      "Bash(shellcheck scripts/*.sh)",
+      "Bash(shellcheck:*)",
+      "Bash(actionlint)",
+      "Bash(actionlint:*)"
+    ],
+    "deny": [
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(gh:*)",
+      "Bash(git push:*)",
+      "Edit(.github/workflows/**)",
+      "Write(.github/workflows/**)"
+    ]
+  }
+}

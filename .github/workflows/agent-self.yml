@@ -1,0 +1,23 @@
+name: agent
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+jobs:
+  agent:
+    if: >-
+      github.event.sender.login == github.repository_owner &&
+      (github.event.label.name == 'agent' || contains(github.event.comment.body, '@agent'))
+    uses: bachtly/agent-kit/.github/workflows/agent.yml@v1
+    # Required: without it the kit's job sees empty secrets, even from the `agent` environment.
+    secrets: inherit
+    with:
+      app_client_id: ${{ vars.AGENT_APP_CLIENT_ID }}
+      python_version: "3.12"
+      # actionlint for the check command; shellcheck is preinstalled on ubuntu runners.
+      setup_command: >-
+        bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+        && sudo mv actionlint /usr/local/bin/
