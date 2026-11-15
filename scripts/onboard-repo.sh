@@ -2,7 +2,7 @@
 # Configure an app repo for agent-kit. Idempotent: safe to re-run.
 #
 # Usage:
-#   scripts/onboard-repo.sh --repo owner/name [--public] [--no-environment] \
+#   scripts/onboard-repo.sh --repo owner/name [--require-review] [--no-environment] \
 #     [--client-id ID] [--key-file path/to/app.private-key.pem]
 #
 # Secrets come from the local environment and are piped to gh on stdin, never printed:
@@ -10,13 +10,14 @@
 #   CLAUDE_CODE_OAUTH_TOKEN and/or ANTHROPIC_API_KEY
 # A secret whose source is unset is skipped, so re-runs don't need every value.
 #
-# --public          repo is public: add the repo owner as required reviewer on the environment
+# --require-review  add the repo owner as required reviewer on the environment, so every run
+#                   waits for approval. Without it, re-running removes any required reviewer.
 # --no-environment  fallback for plans without private-repo environments: use repo secrets
 #                   (the caller workflow must then pass `environment: ''` and `secrets: inherit`)
 set -euo pipefail
 
 ENV_NAME=agent
-repo="" public=false use_env=true
+repo="" require_review=false use_env=true
 client_id="${AGENT_APP_CLIENT_ID:-}"
 key_file="${AGENT_APP_PRIVATE_KEY_FILE:-}"
 
@@ -25,7 +26,7 @@ die() { echo "error: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) repo="${2:?}"; shift 2 ;;
-    --public) public=true; shift ;;
+    --require-review) require_review=true; shift ;;
     --no-environment) use_env=false; shift ;;
     --client-id) client_id="${2:?}"; shift 2 ;;
     --key-file) key_file="${2:?}"; shift 2 ;;
@@ -40,9 +41,6 @@ gh auth status > /dev/null 2>&1 || die "run 'gh auth login' first"
 
 visibility="$(gh repo view "$repo" --json visibility --jq .visibility)"
 default_branch="$(gh repo view "$repo" --json defaultBranchRef --jq .defaultBranchRef.name)"
-if [ "$visibility" = PUBLIC ] && [ "$public" = false ]; then
-  die "$repo is public: re-run with --public (adds you as required reviewer on the '$ENV_NAME' environment)"
-fi
 echo "repo=$repo visibility=$visibility default_branch=$default_branch"
 
 echo "== labels"
@@ -57,11 +55,13 @@ label type:chore    cfd3d7 "Agent profile: chore (default)"
 secret_flags=()
 if [ "$use_env" = true ]; then
   echo "== environment '$ENV_NAME' (deployments from $default_branch only)"
-  reviewers=""
-  if [ "$public" = true ]; then
+  reviewers=',"reviewers":[]'
+  if [ "$require_review" = true ]; then
     owner_id="$(gh api "users/${repo%%/*}" --jq .id)"
     reviewers=",\"reviewers\":[{\"type\":\"User\",\"id\":${owner_id}}],\"prevent_self_review\":false"
     echo "  required reviewer: ${repo%%/*}"
+  else
+    echo "  required reviewer: none"
   fi
   printf '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}%s}' "$reviewers" \
     | gh api -X PUT "repos/$repo/environments/$ENV_NAME" --input - > /dev/null \

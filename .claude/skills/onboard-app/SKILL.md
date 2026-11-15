@@ -53,16 +53,16 @@ Show both files and the caller `with:` block in full, plus a short table of comm
   (from `claude setup-token`) or `ANTHROPIC_API_KEY` exported in their shell.
 - **Public repo:** recommend a separate Anthropic Console workspace API key with a monthly spend
   limit for this repo, rather than their personal subscription token. Explain that anyone can open
-  issues, but only the owner's label or comment starts a run, and the environment's required
-  reviewer means the owner approves each run.
+  issues, but only the owner's label or comment starts a run. Runs start without approval unless
+  they want `--require-review` (owner approves every run).
 
 ## 4. Run the setup script
 
 ```sh
-scripts/onboard-repo.sh --repo <owner/name> --client-id <id> --key-file <path.pem> [--public]
+scripts/onboard-repo.sh --repo <owner/name> --client-id <id> --key-file <path.pem> [--require-review]
 ```
 
-Add `--public` when the repo is public. Add `--no-environment` only if environment creation fails
+Add `--require-review` only if the user wants to approve every run. Add `--no-environment` only if environment creation fails
 on a private repo (plan limitation). Then the caller must use `environment: ''` and
 `secrets: inherit` (see README). Never echo, cat or log secret values or the key file. The
 script reads them from env/file and pipes them to `gh`.
@@ -79,7 +79,7 @@ Commit, push, `gh pr create`. Then tell the user how to test after merging:
 
 1. Create an issue: "Add a one-line 'Maintained with agent-kit' note to the end of README.md".
 2. Add labels `type:chore`, then `agent`.
-3. Expect: 👀 or `agent:working` label → a run under Actions (approve it if the repo is public) →
+3. Expect: 👀 or `agent:working` label → a run under Actions (approve it if `--require-review` was used) →
    a draft PR from `agent/issue-<N>` → a reply and a state comment on the issue.
 4. Comment `@agent also bold it` to test a follow-up run on the same branch.
 
