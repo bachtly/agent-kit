@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash({{INSTALL_COMMAND}})",
+      "Bash({{BUILD_COMMAND}})",
+      "Bash({{TEST_COMMAND}}:*)",
+      "Bash({{LINT_COMMAND}}:*)"
+    ],
+    "deny": [
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(gh:*)",
+      "Bash(git push:*)",
+      "Edit(.github/workflows/**)",
+      "Write(.github/workflows/**)"
+    ]
+  }
+}

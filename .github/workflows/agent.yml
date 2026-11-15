@@ -1,0 +1,234 @@
+name: agent
+
+on:
+  workflow_call:
+    inputs:
+      app_client_id:
+        description: Client ID of the agent GitHub App (repo variable AGENT_APP_CLIENT_ID).
+        type: string
+        required: true
+      kit_ref:
+        description: agent-kit ref to load profiles, router and plugins from. Keep equal to the tag in `uses:`.
+        type: string
+        default: v1
+      environment:
+        description: "Environment holding the secrets. Pass '' to use repo secrets with secrets: inherit."
+        type: string
+        default: agent
+      timeout_minutes:
+        type: number
+        default: 60
+      node_version:
+        description: Install this Node.js version before the agent runs (empty = runner default).
+        type: string
+        default: ""
+      python_version:
+        description: Install this Python version before the agent runs (empty = runner default).
+        type: string
+        default: ""
+      dotnet_version:
+        description: Install this .NET SDK version before the agent runs (empty = runner default).
+        type: string
+        default: ""
+      setup_command:
+        description: Shell command run on the agent branch before the agent, e.g. `npm ci`. No secrets in its env.
+        type: string
+        default: ""
+    secrets:
+      AGENT_APP_PRIVATE_KEY:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    # Same check as the caller, repeated here as defense in depth.
+    if: >-
+      github.event.sender.login == github.repository_owner &&
+      ((github.event_name == 'issues' && github.event.label.name == 'agent') ||
+       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@agent')))
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    concurrency:
+      group: agent-${{ github.repository }}-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    env:
+      REPO: ${{ github.repository }}
+      NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Mint GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ inputs.app_client_id }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+
+      - name: Resolve bot identity
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          login="${SLUG}[bot]"
+          id="$(gh api "users/${login}" --jq .id)"
+          {
+            echo "login=${login}"
+            echo "id=${id}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api -X POST "repos/${REPO}/issues/${NUMBER}/labels" -f "labels[]=agent:working" > /dev/null
+          gh api -X DELETE "repos/${REPO}/issues/${NUMBER}/labels/agent" > /dev/null 2>&1 || true
+          gh api -X DELETE "repos/${REPO}/issues/${NUMBER}/labels/agent:failed" > /dev/null 2>&1 || true
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X POST "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" -f content=eyes > /dev/null
+          fi
+
+      - name: Check out app repo
+        uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out agent-kit
+        uses: actions/checkout@v7
+        with:
+          repository: bachtly/agent-kit
+          ref: ${{ inputs.kit_ref }}
+          path: .agent-kit
+          persist-credentials: false
+
+      - name: Hide agent-kit and agent output from git
+        run: printf '.agent-kit/\n.agent-out/\n' >> .git/info/exclude
+
+      - name: Route
+        id: route
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          AGENT_BOT_LOGIN: ${{ steps.bot.outputs.login }}
+        run: python3 .agent-kit/router/route.py
+
+      - name: Check out or create branch
+        id: branch
+        env:
+          REF: ${{ steps.route.outputs.ref }}
+          BOT_LOGIN: ${{ steps.bot.outputs.login }}
+          BOT_ID: ${{ steps.bot.outputs.id }}
+        run: |
+          git config user.name "$BOT_LOGIN"
+          git config user.email "${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
+          if git rev-parse --verify --quiet "origin/${REF}" > /dev/null; then
+            git checkout -B "$REF" "origin/${REF}"
+          else
+            git checkout -b "$REF"
+          fi
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - if: ${{ inputs.node_version != '' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node_version }}
+      - if: ${{ inputs.python_version != '' }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ inputs.python_version }}
+      - if: ${{ inputs.dotnet_version != '' }}
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+      - name: App setup
+        if: ${{ inputs.setup_command != '' }}
+        env:
+          SETUP_COMMAND: ${{ inputs.setup_command }}
+        run: bash -c "$SETUP_COMMAND"
+
+      - name: Run Claude
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Read-only on purpose: the agent never holds a token that can write. Later steps push.
+          github_token: ${{ github.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ steps.route.outputs.prompt }}
+          claude_args: ${{ steps.route.outputs.claude_args }}
+          plugin_marketplaces: ./.agent-kit
+          plugins: ${{ steps.route.outputs.plugins }}
+          bot_name: ${{ steps.bot.outputs.login }}
+          bot_id: ${{ steps.bot.outputs.id }}
+
+      - name: Push, open draft PR, post comments
+        if: ${{ !cancelled() && steps.branch.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REF: ${{ steps.route.outputs.ref }}
+          IS_PR: ${{ steps.route.outputs.is_pr }}
+          BASE: ${{ steps.branch.outputs.base }}
+          TITLE: ${{ github.event.issue.title }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Token comes from the environment at call time and is never written to .git/config.
+          # shellcheck disable=SC2016
+          auth_git() { git -c credential.helper= -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' "$@"; }
+
+          if [ -n "$(git diff --name-only "$BASE" HEAD -- .github/workflows)" ]; then
+            echo "::error::The agent changed .github/workflows. Refusing to push."
+            exit 1
+          fi
+
+          pr=""
+          [ "$IS_PR" = true ] && pr="$NUMBER"
+          if [ "$(git rev-list --count "${BASE}..HEAD")" -gt 0 ]; then
+            auth_git push "https://github.com/${REPO}.git" "HEAD:refs/heads/${REF}"
+            if [ "$IS_PR" = false ]; then
+              pr="$(gh pr list -R "$REPO" --head "$REF" --state open --json number --jq '.[0].number // empty')"
+              if [ -z "$pr" ]; then
+                url="$(gh pr create -R "$REPO" --draft --head "$REF" --base "$DEFAULT_BRANCH" \
+                  --title "$TITLE" --body "Closes #${NUMBER}. Opened by the agent, see the issue for the plan and state.")"
+                pr="${url##*/}"
+              fi
+            fi
+          fi
+
+          mkdir -p .agent-out
+          if [ -s .agent-out/reply.md ]; then
+            gh api "repos/${REPO}/issues/${NUMBER}/comments" -F body=@.agent-out/reply.md > /dev/null
+          fi
+          if [ ! -s .agent-out/state.md ]; then
+            printf '## Agent state\n\n**Status:** blocked\n\nThe run ended without writing a state comment. Check the run log.\n' > .agent-out/state.md
+          fi
+          {
+            echo '<!-- agent-state -->'
+            cat .agent-out/state.md
+            echo
+            echo "_Run: ${RUN_URL}${pr:+ · PR: #${pr}}_"
+          } > .agent-out/state-post.md
+          gh api "repos/${REPO}/issues/${NUMBER}/comments" -F body=@.agent-out/state-post.md > /dev/null
+
+      - name: Remove working label
+        if: ${{ always() && steps.app.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: gh api -X DELETE "repos/${REPO}/issues/${NUMBER}/labels/agent:working" > /dev/null 2>&1 || true
+
+      - name: Report failure
+        if: ${{ failure() && steps.app.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/${REPO}/issues/${NUMBER}/labels" -f "labels[]=agent:failed" > /dev/null
+          gh api "repos/${REPO}/issues/${NUMBER}/comments" -f body="Agent run failed: ${RUN_URL}" > /dev/null
