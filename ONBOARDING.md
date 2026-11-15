@@ -17,17 +17,17 @@ repo and say "onboard owner/repo". Keep this file and the skill in sync.
 - [ ] **Run the setup script** with secrets exported locally (never paste them into chat):
       ```sh
       export CLAUDE_CODE_OAUTH_TOKEN=...        # or ANTHROPIC_API_KEY=...
-      scripts/onboard-repo.sh --repo owner/repo --client-id Iv23... --key-file ~/keys/agent.pem [--public]
+      scripts/onboard-repo.sh --repo owner/repo --client-id Iv23... --key-file ~/keys/agent.pem [--require-review]
       ```
       It creates the labels, the `agent` environment (default branch only, plus you as required
-      reviewer with `--public`), the `AGENT_APP_CLIENT_ID` variable and the environment secrets.
+      reviewer with `--require-review`), the `AGENT_APP_CLIENT_ID` variable and the environment secrets.
       If environments aren't available on your plan, use `--no-environment` and the README fallback caller.
 - [ ] **Open a PR in the app repo** adding `.github/workflows/agent.yml` (from
       `templates/app-repo/`, with `node_version`/`python_version`/`dotnet_version` and
       `setup_command` set to match CI), `CLAUDE.md` and `.claude/settings.json`. Merge it.
 - [ ] **Test:** open an issue "Add a one-line 'Maintained with agent-kit' note to the end of
       README.md", add `type:chore`, then `agent`. Expect `agent:working`, an Actions run (approve
-      it on public repos), a draft PR from `agent/issue-<N>`, and a reply plus a state comment.
+      it if you used `--require-review`), a draft PR from `agent/issue-<N>`, and a reply plus a state comment.
       Then comment `@agent also bold it` to test a follow-up run.
 - [ ] **Floods on public repos:**
       `gh api -X PUT repos/owner/repo/interaction-limits -f limit=collaborators_only -f expiry=one_week`.

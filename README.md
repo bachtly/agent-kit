@@ -84,9 +84,10 @@ then implement after you reply `@agent approve` (or with changes).
   body is wrapped as untrusted data. Only the bot's comments count as state.
 - **Secrets** sit in an `agent` environment that only the default branch may deploy to. Never put
   deploy or cloud credentials in this job.
-- **Public repos:** add yourself as a required reviewer on the `agent` environment (each run waits
-  for your approval), use a separate Anthropic Console workspace key with a monthly spend limit,
-  and switch on GitHub interaction limits during floods. `scripts/onboard-repo.sh --public` does the reviewer step.
+- **Public repos:** only the owner's label or `@agent` comment starts a run (the caller's `if:`), so
+  runs start without approval. Use a separate Anthropic Console workspace key with a monthly spend
+  limit, and switch on GitHub interaction limits during floods. For a manual approval gate on every
+  run, use `scripts/onboard-repo.sh --require-review` (adds you as required reviewer).
 
 ## One-time setup
 
@@ -113,8 +114,8 @@ then implement after you reply `@agent approve` (or with changes).
 | `CLAUDE_CODE_OAUTH_TOKEN` | secret | `agent` environment | from `claude setup-token` (set this or the next one) |
 | `ANTHROPIC_API_KEY` | secret | `agent` environment | Console API key (recommended for public repos, with a spend limit) |
 
-The `agent` environment has a deployment branch policy that allows only the default branch, plus
-a required reviewer (you) on public repos.
+The `agent` environment has a deployment branch policy that allows only the default branch. With
+`--require-review` it also has you as required reviewer, so every run waits for your approval.
 
 The caller must pass `secrets: inherit` (the template does). Without it the reusable workflow sees
 empty secrets, even though its job runs in the `agent` environment, and the token step fails with
