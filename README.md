@@ -116,6 +116,10 @@ then implement after you reply `@agent approve` (or with changes).
 The `agent` environment has a deployment branch policy that allows only the default branch, plus
 a required reviewer (you) on public repos.
 
+The caller must pass `secrets: inherit` (the template does). Without it the reusable workflow sees
+empty secrets, even though its job runs in the `agent` environment, and the token step fails with
+"The 'private-key' input must be set to a non-empty string".
+
 **Fallback (no environments for private repos on your plan):** run the script with
 `--no-environment` to store them as repo secrets, and change the caller to:
 
