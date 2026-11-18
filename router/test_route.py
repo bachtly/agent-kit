@@ -16,7 +16,7 @@ def comment(login, body, at="2026-01-01T00:00:00Z", **extra):
     return {"user": {"login": login}, "body": body, "created_at": at, **extra}
 
 
-def issue_event(number=7, labels=(), body="Fix the thing", pr=False):
+def issue_event(number=7, labels=(), body="Fix the thing", pr=False, private=True):
     issue = {
         "number": number,
         "title": "Title here",
@@ -25,7 +25,33 @@ def issue_event(number=7, labels=(), body="Fix the thing", pr=False):
     }
     if pr:
         issue["pull_request"] = {"url": "x"}
-    return {"repository": {"full_name": REPO, "owner": {"login": OWNER}}, "issue": issue}
+    repository = {"full_name": REPO, "owner": {"login": OWNER}}
+    if private is not None:
+        repository["private"] = private
+    return {"repository": repository, "issue": issue}
+
+
+def allowed_tools(claude_args):
+    return re.search(r'--allowedTools "([^"]*)"', claude_args).group(1).split(",")
+
+
+def with_profiles(files):
+    """Context manager: point route.PROFILES_DIR at a temp dir holding `files`."""
+    import contextlib
+    import pathlib
+
+    @contextlib.contextmanager
+    def cm():
+        with tempfile.TemporaryDirectory() as d:
+            d = pathlib.Path(d)
+            for name, text in {"_base.md": "base", **files}.items():
+                (d / name).write_text(text, encoding="utf-8")
+            old, route.PROFILES_DIR = route.PROFILES_DIR, d
+            try:
+                yield d
+            finally:
+                route.PROFILES_DIR = old
+    return cm()
 
 
 class FakeApi:
@@ -158,6 +184,29 @@ class RouteTests(unittest.TestCase):
                     route.build(issue_event(), FakeApi(), BOT)
             finally:
                 route.PROFILES_DIR = old
+
+    def test_web_tools_private_repo_search_only(self):
+        out = route.build(issue_event(private=True), FakeApi(), BOT)
+        tools = allowed_tools(out["claude_args"])
+        self.assertIn("WebSearch", tools)
+        self.assertNotIn("WebFetch", tools)
+        self.assertIn("(no WebFetch: private repo)", out["prompt"])
+
+    def test_web_tools_public_repo_adds_fetch(self):
+        out = route.build(issue_event(private=False), FakeApi(), BOT)
+        tools = allowed_tools(out["claude_args"])
+        self.assertEqual([t for t in tools if t.startswith("Web")], ["WebSearch", "WebFetch"])
+        self.assertIn("- Web tools: WebSearch, WebFetch\n", out["prompt"])
+
+    def test_web_tools_unknown_visibility_treated_as_private(self):
+        tools = allowed_tools(route.build(issue_event(private=None), FakeApi(), BOT)["claude_args"])
+        self.assertNotIn("WebFetch", tools)
+
+    def test_profile_cannot_grant_web_tools(self):
+        for tool in ("WebFetch", "WebFetch(domain:example.com)", "WebSearch"):
+            with with_profiles({"chore.md": f"---\nallowed_tools: Read,{tool}\n---\nx"}):
+                with self.assertRaises(SystemExit, msg=tool):
+                    route.build(issue_event(private=False), FakeApi(), BOT)
 
     def test_frontmatter(self):
         meta, body = route.parse_frontmatter("---\nmodel: opus\nplugins: a, b@x\n---\n\nBody\n")
