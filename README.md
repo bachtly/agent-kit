@@ -146,9 +146,22 @@ empty secrets, even though its job runs in the `agent` environment, and the toke
 | Comment `@agent <instruction>` on the issue | Follow-up run on the same branch |
 | Comment `@agent ...` in a PR's Conversation tab | Run on the PR branch. Its inline review comments are included as `path:line` |
 | Comment inline on a feature's design doc, then `@agent approve` | Applies your changes to the doc, then implements it |
+| Open a `type:mockup` issue, then `agent` | Storybook stories with mock data for the screens, reviewed in the PR's Storybook preview (your app's CI publishes it). On approval, drafts the follow-up feature or epic issue |
 | Open a `type:epic` issue, then `agent` | Design doc → slice breakdown → slice issues that run by themselves → one big epic PR (see below) |
 
 Inline review comments don't trigger runs. Leave them, then post one `@agent address the review`.
+
+## Which type to use
+
+| Work | Label | Your gates |
+|---|---|---|
+| Bug, colour or theme tweak, button, scrolling | `type:bug` / `type:chore` | the PR |
+| Large feature, one PR is fine | `type:feature` | design doc, then the PR |
+| Large feature, built in parallel slices, one big PR | `type:epic` | design doc, slice list, then the epic PR |
+| Needs visual feedback first | `type:mockup` | the Storybook preview; then open a feature or epic |
+
+Every run researches its decisions on the web first (`web-research` skill) and lists queries and
+sources under Research in the state comment.
 
 ## Epics
 
