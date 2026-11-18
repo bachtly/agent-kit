@@ -79,6 +79,10 @@ then implement after you reply `@agent approve` (or with changes).
 - **Tool allowlists** come from the profile (file tools plus `git status/diff/log/add/commit/mv/rm`)
   and the app's `.claude/settings.json` (its test/lint commands). They never include `Bash(*)`,
   `gh`, `curl` or `git push`, and the router rejects `Bash`, `Bash(*)` and `gh api` in profiles.
+- **Web tools** are added by the router, never by a profile (it rejects `WebSearch`/`WebFetch` in
+  `allowed_tools`). `WebSearch` is on for every run: it sends only query text. `WebFetch` can carry
+  data out in a URL, so it is on only when the event says the repo is public. The `web-research`
+  skill forbids repo content in queries or URLs and treats fetched pages as untrusted data.
   `--permission-mode default` denies anything not allowed.
 - **Trust filter.** Only comments from the repo owner and the App bot reach the prompt. The issue
   body is wrapped as untrusted data. Only the bot's comments count as state.

@@ -27,6 +27,7 @@ python -m unittest discover -s router -v && shellcheck scripts/*.sh && actionlin
   (contents: read). The App token is used only by workflow steps, via a credential helper,
   never persisted.
 - Profiles never allow `Bash`, `Bash(*)`, `gh`, `curl` or `git push`. The router enforces part of this.
+- Web tools come from the router only: `WebSearch` always, `WebFetch` only on public repos.
 - Only comments from the repo owner and the App bot reach the prompt. Only bot comments count as state.
 - The App has no Workflows permission. The push step refuses `.github/workflows/` changes.
 - `ONBOARDING.md` mirrors `.claude/skills/onboard-app/SKILL.md`.

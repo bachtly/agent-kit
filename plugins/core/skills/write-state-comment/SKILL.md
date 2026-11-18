@@ -15,7 +15,7 @@ structure:
 ```markdown
 ## Agent state
 
-**Status:** <one of: plan-proposed | waiting-for-owner | in-progress | ready-for-review | blocked>
+**Status:** <one of: plan-proposed | design-proposed | breakdown-proposed | waiting-for-owner | in-progress | ready-for-review | blocked>
 **Profile:** <bug | feature | chore | ...>
 **Branch:** `<branch>` · **PR:** <#number, or "opened by workflow after this run">
 
@@ -26,6 +26,10 @@ structure:
 ### Decisions
 - <decision>: <one-line reason>. Include assumptions you made instead of asking.
 
+### Research
+- <question> → <choice>: <reason>, with queries and source links (see the `web-research`
+  skill), or "no decision, no research"
+
 ### Open questions
 - <question for the owner, or "None">
 
@@ -34,9 +38,10 @@ structure:
 ```
 
 Rules:
-- Carry forward decisions and plan items from the previous state comment unless they changed.
-- Status `waiting-for-owner` or `plan-proposed` means the next run must start by reading the
-  owner's reply.
+- Carry forward decisions, research and plan items from the previous state comment unless they changed.
+- Status `waiting-for-owner`, `plan-proposed`, `design-proposed` or `breakdown-proposed` means the
+  next run must start by reading the owner's reply. `design-proposed`: a design doc is committed
+  on the branch for inline review. `breakdown-proposed`: an epic's slice list is committed for review.
 - Status `blocked` means you cannot continue without something only the owner can do (access,
   workflow edits, credentials). Say what that is under Open questions.
 - Keep it under about 40 lines. Link to files as `path:line` instead of pasting code.
