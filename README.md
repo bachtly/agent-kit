@@ -44,7 +44,8 @@ comments, so state carries over from issue to PR.
 ### Ask or proceed
 
 The agent asks 1-3 questions and stops only when a wrong guess would waste the run. Otherwise
-it states its assumption and proceeds. `type:feature` runs in two phases: post a plan and stop,
+it states its assumption and proceeds. `type:feature` runs in two phases: commit a design doc
+(`docs/design/<issue>-<slug>.md`) to the draft PR and stop, so you can comment on it line by line,
 then implement after you reply `@agent approve` (or with changes).
 
 ## Run lifecycle
@@ -143,7 +144,7 @@ empty secrets, even though its job runs in the `agent` environment, and the toke
 | Open an issue, add `type:bug`/`type:feature`/`type:chore`, then `agent` | Works it on `agent/issue-<N>` and opens a draft PR |
 | Comment `@agent <instruction>` on the issue | Follow-up run on the same branch |
 | Comment `@agent ...` in a PR's Conversation tab | Run on the PR branch. Its inline review comments are included as `path:line` |
-| Reply `@agent approve` to a feature plan | Implements the plan |
+| Comment inline on a feature's design doc, then `@agent approve` | Applies your changes to the doc, then implements it |
 
 Inline review comments don't trigger runs. Leave them, then post one `@agent address the review`.
 

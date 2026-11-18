@@ -49,7 +49,7 @@ label agent         5319e7 "Start the agent on this issue"
 label agent:working fbca04 "Agent run in progress"
 label agent:failed  d93f0b "Last agent run failed; see the comment for the run link"
 label type:bug      d73a4a "Agent profile: bug"
-label type:feature  a2eeef "Agent profile: feature (plan, then implement)"
+label type:feature  a2eeef "Agent profile: feature (design doc, then implement)"
 label type:chore    cfd3d7 "Agent profile: chore (default)"
 
 secret_flags=()
