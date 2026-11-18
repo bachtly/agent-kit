@@ -8,6 +8,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import slices  # noqa: E402
 
+slices.MERGE_RETRY_SECONDS = 0
+
 OWNER = "owner"
 BOT = "agent-kit-bot[bot]"
 REPO = f"{OWNER}/app"
@@ -107,6 +109,17 @@ class ValidateTests(unittest.TestCase):
             with self.assertRaises(SystemExit, msg=name):
                 slices.validate(data)
 
+    def test_rejected_list_explained_on_epic(self):
+        api = FakeApi()
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(SystemExit):
+                slices.create(api, REPO, 10, OWNER, BOT, write(d, "s.json", '[{"id": "A B", "title": "t"}]'))
+            with self.assertRaises(SystemExit):
+                slices.create(api, REPO, 10, OWNER, BOT, write(d, "t.json", "not json"))
+        self.assertEqual(len(api.comments(10)), 2)
+        self.assertIn("rejected", api.comments(10)[0])
+        self.assertFalse(any(p == f"repos/{REPO}/issues" for _, p, _ in api.calls))
+
 
 class CreateTests(unittest.TestCase):
     def test_creates_marks_and_starts_independent_slices(self):
@@ -182,6 +195,7 @@ class LandTests(unittest.TestCase):
                       fail={("PUT", f"repos/{REPO}/pulls/30/merge")})
         with self.assertRaises(SystemExit):
             self.land(api)
+        self.assertEqual(sum(1 for m, _, _ in api.calls if m == "PUT"), slices.MERGE_ATTEMPTS)
         self.assertIn("resolve", api.comments(11)[0])
         self.assertFalse(any(m == "PATCH" for m, _, _ in api.calls))
 

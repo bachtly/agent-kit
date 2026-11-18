@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -29,6 +30,7 @@ MAX_TITLE = 120
 MAX_BODY = 20_000
 SLICE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,30}")
 WAITING = "slice:waiting"
+MERGE_ATTEMPTS, MERGE_RETRY_SECONDS = 3, 5  # mergeability is computed lazily after PR creation
 STATUS = re.compile(r"^\*\*Status:\*\*\s*`?([a-z-]+)", re.M)
 
 
@@ -109,7 +111,12 @@ def create(api, repo, epic, owner, bot, path=OUT / "slices.json"):
     if not path.is_file():
         print("no slices.json: nothing to create")
         return []
-    slices = validate(json.loads(path.read_text(encoding="utf-8")))
+    try:
+        slices = validate(json.loads(path.read_text(encoding="utf-8")))
+    except (SystemExit, ValueError) as err:
+        comment(api, repo, epic, f"The slice list was rejected, no issues were created: {err}\n\n"
+                "Reply `@agent fix the slice list` to correct it.")
+        raise SystemExit(f"slices.json rejected: {err}")
     if epic_slices(api, repo, epic, owner, bot):
         raise SystemExit(f"Epic #{epic} already has slice issues. Refusing to create more.")
 
@@ -161,8 +168,7 @@ def land(api, repo, number, epic, pr, owner, bot, state_path=OUT / "state.md"):
     if pull["base"]["ref"] != epic_ref or pull["state"] != "open":
         raise SystemExit(f"PR #{pr} is not an open PR into {epic_ref}. Refusing to merge it.")
     try:
-        api.request("PUT", f"repos/{repo}/pulls/{pr}/merge",
-                    {"merge_method": "merge", "commit_title": f"Merge slice #{number} into epic #{epic} (#{pr})"})
+        merge(api, repo, pr, f"Merge slice #{number} into epic #{epic} (#{pr})")
     except GhError as err:
         comment(api, repo, number,
                 f"Could not merge PR #{pr} into `{epic_ref}`: {err}\n\n"
@@ -173,6 +179,16 @@ def land(api, repo, number, epic, pr, owner, bot, state_path=OUT / "state.md"):
     comment(api, repo, number, f"Merged into `{epic_ref}` with #{pr}.")
     start_ready(api, repo, epic, owner, bot, just_closed=number)
     return True
+
+
+def merge(api, repo, pr, title):
+    for attempt in range(MERGE_ATTEMPTS):
+        try:
+            return api.request("PUT", f"repos/{repo}/pulls/{pr}/merge", {"merge_method": "merge", "commit_title": title})
+        except GhError:
+            if attempt == MERGE_ATTEMPTS - 1:
+                raise
+            time.sleep(MERGE_RETRY_SECONDS)
 
 
 def start_ready(api, repo, epic, owner, bot, just_closed=None):
