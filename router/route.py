@@ -3,7 +3,7 @@
 
 Reads GITHUB_EVENT_PATH, calls the GitHub API through the `gh` CLI, and writes
 these step outputs to GITHUB_OUTPUT:
-  prompt, claude_args, plugins, profile, ref, is_pr, issue
+  prompt, claude_args, plugins, profile, ref, is_pr, issue, base_ref, epic
 
 Env: GITHUB_EVENT_PATH, GITHUB_OUTPUT, GH_TOKEN (for gh),
      AGENT_BOT_LOGIN (e.g. "my-agent[bot]").
@@ -29,6 +29,9 @@ FORBIDDEN_TOOL_PREFIXES = ("Bash(gh", "Bash(curl", "Bash(wget", "Bash(git push")
 # Web tools are added by the router, never by a profile. WebFetch can carry data out in a URL,
 # so it is granted only on public repos, where there is nothing private to leak.
 WEB_TOOLS = ("WebSearch", "WebFetch")
+# Epics: the workflow creates one issue per slice, with this marker, and labels it `type:slice`.
+SLICE_LABEL = "type:slice"
+SLICE_MARKER = re.compile(r"<!-- agent-slice epic=(\d+) id=([a-z0-9-]+) deps=([0-9,]*) -->")
 
 
 class GhApi:
@@ -103,6 +106,36 @@ def web_tools(repository):
     return ["WebSearch"] + (["WebFetch"] if repository.get("private") is False else [])
 
 
+def slice_info(issue, owner, bot):
+    """{'epic', 'id', 'deps'} for a slice issue created by the workflow (or the owner), else None."""
+    if (issue.get("user") or {}).get("login") not in (owner, bot):
+        return None
+    match = SLICE_MARKER.search(issue.get("body") or "")
+    if not match:
+        return None
+    epic, slice_id, deps = match.groups()
+    return {"epic": int(epic), "id": slice_id, "deps": [int(d) for d in deps.split(",") if d]}
+
+
+def check_sender(event, owner, bot, labels):
+    """The owner starts runs. The bot may only start a slice run, by labeling its own slice issue."""
+    sender = (event.get("sender") or {}).get("login")
+    if sender == owner:
+        return
+    issue = event["issue"]
+    bot_slice_start = (
+        sender == bot
+        and event.get("action") == "labeled"
+        and (event.get("label") or {}).get("name") == "agent"
+        and "pull_request" not in issue
+        and SLICE_LABEL in labels
+        and (issue.get("user") or {}).get("login") == bot
+        and slice_info(issue, owner, bot) is not None
+    )
+    if not bot_slice_start:
+        raise SystemExit(f"Refusing a run started by {sender!r}: only the owner, or the bot on its own slice issue.")
+
+
 def build(event, api, bot):
     repo = event["repository"]["full_name"]
     owner = event["repository"]["owner"]["login"]
@@ -110,6 +143,7 @@ def build(event, api, bot):
     issue = event["issue"]
     number = issue["number"]
     is_pr = "pull_request" in issue
+    check_sender(event, owner, bot, label_names(issue))
 
     comments = api.list(f"repos/{repo}/issues/{number}/comments")
     all_comments = list(comments)
@@ -127,15 +161,22 @@ def build(event, api, bot):
             if c["user"]["login"] in trusted_users
         ]
         match = ISSUE_BRANCH.fullmatch(ref)
+        origin_issue = None
         if match:
             origin = int(match.group(1))
             all_comments += api.list(f"repos/{repo}/issues/{origin}/comments")
+            origin_issue = api.get(f"repos/{repo}/issues/{origin}")
             if not has_type_label(labels):
-                labels = label_names(api.get(f"repos/{repo}/issues/{origin}"))
+                labels = label_names(origin_issue)
     else:
         ref = f"agent/issue-{number}"
+        origin_issue = issue
 
     profile = pick_profile(labels)
+    slice_of = slice_info(origin_issue, owner, bot) if origin_issue and SLICE_LABEL in labels else None
+    if profile == "slice" and not slice_of:
+        raise SystemExit("type:slice runs only on slice issues created by the workflow from an epic.")
+    epic = slice_of["epic"] if slice_of else None
     meta, profile_body = parse_frontmatter((PROFILES_DIR / f"{profile}.md").read_text(encoding="utf-8"))
     base = (PROFILES_DIR / "_base.md").read_text(encoding="utf-8")
 
@@ -157,6 +198,9 @@ def build(event, api, bot):
         f"- {kind.capitalize()} #{number}: {issue['title']}\n"
         f"- Branch (already checked out): `{ref}`\n"
         + (f"- Origin issue: #{origin}\n" if is_pr and origin != number else "")
+        + (f"- Epic: #{epic}. This slice branched from `agent/issue-{epic}`, its PR targets that "
+           f"branch, and the workflow merges it there when you finish with `ready-for-review`.\n"
+           if epic else "")
         + f"- Web tools: {', '.join(web)}"
         + ("" if "WebFetch" in web else " (no WebFetch: private repo)") + "\n",
         "## Task description\n\n"
@@ -200,6 +244,9 @@ def build(event, api, bot):
         "ref": ref,
         "is_pr": "true" if is_pr else "false",
         "issue": str(origin),
+        # PR base and new-branch start point: the epic's branch for a slice, else the default branch.
+        "base_ref": f"agent/issue-{epic}" if epic else "",
+        "epic": str(epic) if epic else "",
     }
 
 

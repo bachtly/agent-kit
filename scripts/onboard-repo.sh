@@ -51,6 +51,9 @@ label agent:failed  d93f0b "Last agent run failed; see the comment for the run l
 label type:bug      d73a4a "Agent profile: bug"
 label type:feature  a2eeef "Agent profile: feature (design doc, then implement)"
 label type:chore    cfd3d7 "Agent profile: chore (default)"
+label type:epic     5319e7 "Agent profile: epic (design, slices, one big PR)"
+label type:slice    c5def5 "Slice of an epic, created by the agent workflow"
+label slice:waiting ededed "Slice waiting for the slices it depends on"
 
 secret_flags=()
 if [ "$use_env" = true ]; then
