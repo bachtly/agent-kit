@@ -268,6 +268,44 @@ class RouteTests(unittest.TestCase):
         out = route.build(issue_event(labels=["type:epic"]), FakeApi(), BOT)
         self.assertEqual((out["profile"], out["base_ref"], out["epic"]), ("epic", "", ""))
 
+    def test_app_allow_rules_reach_allowed_tools(self):
+        settings = {"permissions": {
+            "allow": ["Bash(npm --prefix app run lint)", "Bash(npm --prefix app test:*)", "Read"],
+            "deny": ["Bash(curl:*)", "Edit(.github/workflows/**)"],
+        }}
+        out = route.build(issue_event(), FakeApi(), BOT, settings)
+        tools = allowed_tools(out["claude_args"])
+        self.assertIn("Bash(npm --prefix app run lint)", tools)
+        self.assertIn("Bash(npm --prefix app test:*)", tools)
+        self.assertEqual(tools.count("Read"), 1)
+        self.assertIn('--disallowedTools "Bash(curl:*),Edit(.github/workflows/**)"', out["claude_args"])
+        self.assertIn("`Bash(npm --prefix app run lint)`", out["prompt"])
+
+    def test_app_cannot_allow_what_the_kit_forbids(self):
+        forbidden = ["Bash", "Bash(*)", "Bash(gh pr create:*)", "Bash(curl:*)", "Bash(git push:*)",
+                     'Bash(echo ")', "WebFetch", "mcp__github__create_issue"]
+        out = route.build(issue_event(), FakeApi(), BOT, {"permissions": {"allow": forbidden}})
+        tools = allowed_tools(out["claude_args"])
+        for rule in forbidden:
+            if rule != "WebFetch":
+                self.assertNotIn(rule, tools, rule)
+        self.assertNotIn("WebFetch", tools)  # private repo: the app can't grant it either
+        self.assertNotIn("--disallowedTools", out["claude_args"])
+
+    def test_no_or_bad_app_settings(self):
+        for settings in (None, {}, {"permissions": "x"}, {"permissions": {"allow": "Bash(ls)"}}):
+            out = route.build(issue_event(), FakeApi(), BOT, settings)
+            self.assertIn("App commands allowed: none", out["prompt"])
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "settings.json")
+            self.assertEqual(route.load_app_settings(route.Path(path)), {})
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("{not json")
+            self.assertEqual(route.load_app_settings(route.Path(path)), {})
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"permissions": {"allow": ["Bash(make test)"]}}')
+            self.assertEqual(route.load_app_settings(route.Path(path))["permissions"]["allow"], ["Bash(make test)"])
+
     def test_frontmatter(self):
         meta, body = route.parse_frontmatter("---\nmodel: opus\nplugins: a, b@x\n---\n\nBody\n")
         self.assertEqual(meta, {"model": "opus", "plugins": "a, b@x"})

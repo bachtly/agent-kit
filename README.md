@@ -79,7 +79,10 @@ then implement after you reply `@agent approve` (or with changes).
   which is `contents: read`. The App token is used only by the workflow's own steps, through a
   one-shot git credential helper, so it is never written to `.git/config`.
 - **Tool allowlists** come from the profile (file tools plus `git status/diff/log/add/commit/mv/rm`)
-  and the app's `.claude/settings.json` (its test/lint commands). They never include `Bash(*)`,
+  and the app's `.claude/settings.json` (its test/lint commands). The router reads that file from the
+  default branch, before the agent's branch is checked out, and passes its `Bash(...)` allow rules as
+  `--allowedTools` and all its deny rules as `--disallowedTools` (claude-code-action doesn't reliably
+  apply the repo's own settings). Rules the kit forbids are dropped with a warning. They never include `Bash(*)`,
   `gh`, `curl` or `git push`, and the router rejects `Bash`, `Bash(*)` and `gh api` in profiles.
 - **Web tools** are added by the router, never by a profile (it rejects `WebSearch`/`WebFetch` in
   `allowed_tools`). `WebSearch` is on for every run: it sends only query text. `WebFetch` can carry

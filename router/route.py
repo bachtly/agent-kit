@@ -136,7 +136,43 @@ def check_sender(event, owner, bot, labels):
         raise SystemExit(f"Refusing a run started by {sender!r}: only the owner, or the bot on its own slice issue.")
 
 
-def build(event, api, bot):
+def load_app_settings(path):
+    """The app repo's .claude/settings.json, or {} if missing or unreadable."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        if path.exists():
+            print(f"::warning::Ignoring unreadable {path}: {err}")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def app_permissions(settings):
+    """(allow, deny) from the app's settings, passed to the CLI explicitly.
+
+    claude-code-action does not reliably apply the checked-out repo's permissions, so the app's
+    test/lint commands were denied. Only `Bash(...)` allow rules are taken (file tools come from
+    the profile); rules the kit forbids are dropped with a warning. Deny rules only restrict, so
+    all of them are passed.
+    """
+    perms = settings.get("permissions") if isinstance(settings.get("permissions"), dict) else {}
+
+    def rules(key):
+        value = perms.get(key, [])
+        return [r.strip() for r in value if isinstance(r, str) and r.strip()] if isinstance(value, list) else []
+
+    allow = []
+    for rule in rules("allow"):
+        if (not rule.startswith("Bash(") or '"' in rule or rule == "Bash(*)"
+                or rule.startswith(FORBIDDEN_TOOL_PREFIXES)):
+            print(f"::warning::Ignoring app allow rule {rule!r}: only Bash(...) rules the kit permits are used.")
+            continue
+        allow.append(rule)
+    deny = [r for r in rules("deny") if '"' not in r]
+    return allow, deny
+
+
+def build(event, api, bot, app_settings=None):
     repo = event["repository"]["full_name"]
     owner = event["repository"]["owner"]["login"]
     trusted_users = {owner, bot}
@@ -190,6 +226,7 @@ def build(event, api, bot):
 
     kind = "pull request" if is_pr else "issue"
     web = web_tools(event["repository"])
+    app_allow, app_deny = app_permissions(app_settings or {})
     parts = [
         base.strip(),
         f"# Profile: {profile}\n\n{profile_body.strip()}",
@@ -201,6 +238,9 @@ def build(event, api, bot):
         + (f"- Epic: #{epic}. This slice branched from `agent/issue-{epic}`, its PR targets that "
            f"branch, and the workflow merges it there when you finish with `ready-for-review`.\n"
            if epic else "")
+        + ("- App commands allowed (run them in exactly this form, from the repo root; if a chain is "
+           "denied, run its parts one by one): " + ", ".join(f"`{r}`" for r in app_allow) + "\n" if app_allow else
+           "- App commands allowed: none (the app's `.claude/settings.json` allows no commands)\n")
         + f"- Web tools: {', '.join(web)}"
         + ("" if "WebFetch" in web else " (no WebFetch: private repo)") + "\n",
         "## Task description\n\n"
@@ -226,12 +266,13 @@ def build(event, api, bot):
             raise SystemExit(f"Profile {profile}: forbidden tool in allowed_tools: {tool}")
         if tool.startswith(WEB_TOOLS):
             raise SystemExit(f"Profile {profile}: web tools are added by the router, not profiles: {tool}")
-    tools += web
+    tools += web + [t for t in app_allow if t not in tools]
     claude_args = (
         f"--model {meta.get('model', 'sonnet')} "
         f"--max-turns {int(meta.get('max_turns', '30'))} "
         "--permission-mode default "
         f'--allowedTools "{",".join(tools)}"'
+        + (f' --disallowedTools "{",".join(app_deny)}"' if app_deny else "")
     )
     extra = [p.strip() for p in meta.get("plugins", "").split(",") if p.strip()]
     plugins = "\n".join([CORE_PLUGIN] + [p if "@" in p else f"{p}@agent-kit" for p in extra])
@@ -261,7 +302,9 @@ def main():
     bot = os.environ["AGENT_BOT_LOGIN"]
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fh:
         event = json.load(fh)
-    outputs = build(event, GhApi(), bot)
+    # The workflow runs the router in the default-branch checkout, before the agent's branch is
+    # checked out, so an agent can't widen its own permissions by editing settings on its branch.
+    outputs = build(event, GhApi(), bot, load_app_settings(Path(".claude/settings.json")))
     write_outputs(outputs, os.environ["GITHUB_OUTPUT"])
     print(f"profile={outputs['profile']} ref={outputs['ref']} is_pr={outputs['is_pr']}")
 
