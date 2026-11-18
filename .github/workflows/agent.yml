@@ -47,11 +47,15 @@ permissions:
 
 jobs:
   run:
-    # Same check as the caller, repeated here as defense in depth.
+    # Same check as the caller, repeated here as defense in depth. The second branch lets the App
+    # start a slice run by labeling its own slice issue; "Check sender" and the router verify that
+    # the bot is this App and that the issue is its own slice.
     if: >-
-      github.event.sender.login == github.repository_owner &&
-      ((github.event_name == 'issues' && github.event.label.name == 'agent') ||
-       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@agent')))
+      (github.event.sender.login == github.repository_owner &&
+       ((github.event_name == 'issues' && github.event.label.name == 'agent') ||
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@agent')))) ||
+      (github.event_name == 'issues' && github.event.sender.type == 'Bot' &&
+       github.event.label.name == 'agent' && contains(github.event.issue.labels.*.name, 'type:slice'))
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
@@ -81,6 +85,17 @@ jobs:
             echo "login=${login}"
             echo "id=${id}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Check sender
+        env:
+          SENDER: ${{ github.event.sender.login }}
+          OWNER: ${{ github.repository_owner }}
+          BOT_LOGIN: ${{ steps.bot.outputs.login }}
+        run: |
+          if [ "$SENDER" != "$OWNER" ] && [ "$SENDER" != "$BOT_LOGIN" ]; then
+            echo "::error::Run started by ${SENDER}, which is neither the owner nor this App. Refusing."
+            exit 1
+          fi
 
       - name: Acknowledge
         env:
@@ -123,6 +138,7 @@ jobs:
         id: branch
         env:
           REF: ${{ steps.route.outputs.ref }}
+          BASE_REF: ${{ steps.route.outputs.base_ref }}
           BOT_LOGIN: ${{ steps.bot.outputs.login }}
           BOT_ID: ${{ steps.bot.outputs.id }}
         run: |
@@ -130,6 +146,9 @@ jobs:
           git config user.email "${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
           if git rev-parse --verify --quiet "origin/${REF}" > /dev/null; then
             git checkout -B "$REF" "origin/${REF}"
+          elif [ -n "$BASE_REF" ]; then
+            # A new slice starts from its epic's branch, which holds the design and merged slices.
+            git checkout -b "$REF" "origin/${BASE_REF}"
           else
             git checkout -b "$REF"
           fi
@@ -169,10 +188,13 @@ jobs:
           bot_id: ${{ steps.bot.outputs.id }}
 
       - name: Push, open draft PR, post comments
+        id: push
         if: ${{ !cancelled() && steps.branch.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REF: ${{ steps.route.outputs.ref }}
+          BASE_REF: ${{ steps.route.outputs.base_ref }}
+          EPIC: ${{ steps.route.outputs.epic }}
           IS_PR: ${{ steps.route.outputs.is_pr }}
           BASE: ${{ steps.branch.outputs.base }}
           TITLE: ${{ github.event.issue.title }}
@@ -196,12 +218,22 @@ jobs:
             if [ "$IS_PR" = false ]; then
               pr="$(gh pr list -R "$REPO" --head "$REF" --state open --json number --jq '.[0].number // empty')"
               if [ -z "$pr" ]; then
-                url="$(gh pr create -R "$REPO" --draft --head "$REF" --base "$DEFAULT_BRANCH" \
-                  --title "$TITLE" --body "Closes #${NUMBER}. Opened by the agent, see the issue for the plan and state.")"
+                if [ -n "$EPIC" ]; then
+                  # Slice PRs are not drafts: the workflow merges them into the epic branch.
+                  url="$(gh pr create -R "$REPO" --head "$REF" --base "$BASE_REF" --title "$TITLE" \
+                    --body "Slice #${NUMBER} of epic #${EPIC}. Merged into \`${BASE_REF}\` by the workflow when the slice is done; review the whole feature on the epic PR.")"
+                else
+                  url="$(gh pr create -R "$REPO" --draft --head "$REF" --base "$DEFAULT_BRANCH" \
+                    --title "$TITLE" --body "Closes #${NUMBER}. Opened by the agent, see the issue for the plan and state.")"
+                fi
                 pr="${url##*/}"
               fi
             fi
           fi
+          if [ -z "$pr" ] && [ -n "$EPIC" ]; then
+            pr="$(gh pr list -R "$REPO" --head "$REF" --state open --json number --jq '.[0].number // empty')"
+          fi
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
 
           mkdir -p .agent-out
           if [ -s .agent-out/reply.md ]; then
@@ -217,6 +249,24 @@ jobs:
             echo "_Run: ${RUN_URL}${pr:+ · PR: #${pr}}_"
           } > .agent-out/state-post.md
           gh api "repos/${REPO}/issues/${NUMBER}/comments" -F body=@.agent-out/state-post.md > /dev/null
+
+      - name: Epic, create slice issues
+        if: ${{ steps.claude.outcome == 'success' && steps.push.outcome == 'success' && steps.route.outputs.profile == 'epic' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          ISSUE: ${{ steps.route.outputs.issue }}
+          AGENT_BOT_LOGIN: ${{ steps.bot.outputs.login }}
+        run: python3 .agent-kit/router/slices.py create
+
+      - name: Slice, merge into the epic branch
+        if: ${{ steps.claude.outcome == 'success' && steps.push.outcome == 'success' && steps.route.outputs.epic != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          ISSUE: ${{ steps.route.outputs.issue }}
+          EPIC: ${{ steps.route.outputs.epic }}
+          PR: ${{ steps.push.outputs.pr }}
+          AGENT_BOT_LOGIN: ${{ steps.bot.outputs.login }}
+        run: python3 .agent-kit/router/slices.py land
 
       - name: Remove working label
         if: ${{ always() && steps.app.outputs.token != '' }}

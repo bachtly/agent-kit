@@ -16,11 +16,13 @@ def comment(login, body, at="2026-01-01T00:00:00Z", **extra):
     return {"user": {"login": login}, "body": body, "created_at": at, **extra}
 
 
-def issue_event(number=7, labels=(), body="Fix the thing", pr=False, private=True):
+def issue_event(number=7, labels=(), body="Fix the thing", pr=False, private=True,
+                sender=OWNER, author=OWNER, action="created", label=None):
     issue = {
         "number": number,
         "title": "Title here",
         "body": body,
+        "user": {"login": author},
         "labels": [{"name": n} for n in labels],
     }
     if pr:
@@ -28,7 +30,19 @@ def issue_event(number=7, labels=(), body="Fix the thing", pr=False, private=Tru
     repository = {"full_name": REPO, "owner": {"login": OWNER}}
     if private is not None:
         repository["private"] = private
-    return {"repository": repository, "issue": issue}
+    event = {"repository": repository, "issue": issue, "sender": {"login": sender}, "action": action}
+    if label:
+        event["label"] = {"name": label}
+    return event
+
+
+SLICE_BODY = "<!-- agent-slice epic=10 id=api deps=11 -->\nSlice `api` of epic #10.\n\nBuild the API."
+
+
+def slice_event(**kw):
+    kw = {"number": 12, "labels": ["type:slice"], "body": SLICE_BODY, "author": BOT,
+          "sender": BOT, "action": "labeled", "label": "agent", **kw}
+    return issue_event(**kw)
 
 
 def allowed_tools(claude_args):
@@ -169,7 +183,8 @@ class RouteTests(unittest.TestCase):
 
     def test_shipped_profiles_pass_tool_check(self):
         for path in route.PROFILES_DIR.glob("[!_]*.md"):
-            out = route.build(issue_event(labels=[f"type:{path.stem}"]), FakeApi(), BOT)
+            event = slice_event() if path.stem == "slice" else issue_event(labels=[f"type:{path.stem}"])
+            out = route.build(event, FakeApi(), BOT)
             self.assertEqual(out["profile"], path.stem)
 
     def test_forbidden_tool_rejected(self):
@@ -208,6 +223,51 @@ class RouteTests(unittest.TestCase):
                 with self.assertRaises(SystemExit, msg=tool):
                     route.build(issue_event(private=False), FakeApi(), BOT)
 
+    def test_non_owner_sender_refused(self):
+        for sender in ("stranger", None):
+            with self.assertRaises(SystemExit, msg=sender):
+                route.build(issue_event(sender=sender), FakeApi(), BOT)
+
+    def test_bot_may_start_its_own_slice(self):
+        out = route.build(slice_event(), FakeApi(), BOT)
+        self.assertEqual(out["profile"], "slice")
+        self.assertEqual(out["ref"], "agent/issue-12")
+        self.assertEqual(out["base_ref"], "agent/issue-10")
+        self.assertEqual(out["epic"], "10")
+        self.assertIn("- Epic: #10.", out["prompt"])
+
+    def test_bot_cannot_start_other_runs(self):
+        cases = {
+            "comment": slice_event(action="created", label=None),
+            "other label": slice_event(label="type:slice"),
+            "not a slice": slice_event(labels=["type:feature"]),
+            "owner-authored": slice_event(author=OWNER),
+            "no marker": slice_event(body="Build the API."),
+            "a PR": slice_event(pr=True),
+        }
+        for name, event in cases.items():
+            with self.assertRaises(SystemExit, msg=name):
+                route.build(event, FakeApi(), BOT)
+
+    def test_slice_profile_needs_slice_issue(self):
+        with self.assertRaises(SystemExit):
+            route.build(issue_event(labels=["type:slice"]), FakeApi(), BOT)
+
+    def test_owner_follow_up_on_slice_pr_keeps_epic_base(self):
+        api = FakeApi(
+            gets={
+                f"repos/{REPO}/pulls/20": {"head": {"ref": "agent/issue-12", "repo": {"full_name": REPO}}},
+                f"repos/{REPO}/issues/12": {"user": {"login": BOT}, "body": SLICE_BODY,
+                                            "labels": [{"name": "type:slice"}]},
+            },
+        )
+        out = route.build(issue_event(number=20, pr=True), api, BOT)
+        self.assertEqual((out["profile"], out["issue"], out["base_ref"]), ("slice", "12", "agent/issue-10"))
+
+    def test_regular_issue_has_no_base_or_epic(self):
+        out = route.build(issue_event(labels=["type:epic"]), FakeApi(), BOT)
+        self.assertEqual((out["profile"], out["base_ref"], out["epic"]), ("epic", "", ""))
+
     def test_frontmatter(self):
         meta, body = route.parse_frontmatter("---\nmodel: opus\nplugins: a, b@x\n---\n\nBody\n")
         self.assertEqual(meta, {"model": "opus", "plugins": "a, b@x"})
@@ -221,7 +281,8 @@ class RouteTests(unittest.TestCase):
             route.write_outputs(out, path)
             with open(path, encoding="utf-8") as fh:
                 parsed = parse_output_file(fh.read())
-        self.assertEqual(set(parsed), {"prompt", "claude_args", "plugins", "profile", "ref", "is_pr", "issue"})
+        self.assertEqual(set(parsed), set(out))
+        self.assertIn("base_ref", parsed)
         self.assertEqual(parsed["prompt"], out["prompt"])
         self.assertEqual(parsed["plugins"], out["plugins"])
 
