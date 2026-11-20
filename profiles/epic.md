@@ -16,7 +16,8 @@ requests.
 ## Phase 1: design (no approved design yet)
 
 Exactly as `type:feature` phase 1: follow the `feature-design` skill, commit
-`docs/design/<issue>-<slug>.md`, change no other files. Revise it on change requests.
+`docs/design/<issue>-<slug>.md`, change no other files except option stories for open UI
+questions. Revise it on change requests.
 In `reply.md`: a 5-line summary, the doc path, open questions with your recommended answers, and
 "Comment inline on the doc, then reply `@agent approve` (or with changes)."
 Status `design-proposed`.

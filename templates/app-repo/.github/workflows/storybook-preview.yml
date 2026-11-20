@@ -1,0 +1,109 @@
+# Storybook preview per PR, so the owner can see the agent's mockup stories (Option A/B/...)
+# from the PR. Copy to .github/workflows/ in the app repo and adjust the marked lines.
+#
+# - build: runs the PR's code with a read-only token and uploads the static Storybook.
+# - publish: never runs PR code. Pushes the build to the `gh-pages` branch under `pr-<N>/` and
+#   comments the link once. Needs GitHub Pages set to "Deploy from a branch: gh-pages / (root)".
+#   Without Pages (e.g. a private repo on the free plan), delete the publish and cleanup jobs:
+#   the build still uploads a `storybook` artifact (download it from the run, open index.html).
+# - cleanup: removes `pr-<N>/` when the PR closes.
+name: storybook-preview
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+permissions:
+  contents: read
+concurrency:
+  group: storybook-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  build:
+    # Same-repo PRs only (the agent's PRs are), never forks.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"   # match CI
+          cache: npm           # pnpm/yarn: change, and add their setup action
+      - run: npm ci            # match CI's install step
+      # The app's Storybook build script; the output folder must be storybook-static/.
+      - run: npm run build-storybook -- --output-dir storybook-static
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storybook
+          path: storybook-static
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push to gh-pages
+      pull-requests: write   # comment the link
+    concurrency:
+      group: storybook-preview-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: storybook
+          path: site
+      - name: Push to gh-pages/pr-${{ github.event.pull_request.number }}
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git init -q pages && cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git fetch -q --depth 1 "$url" gh-pages; then git checkout -q FETCH_HEAD; fi
+          git checkout -q -B gh-pages
+          rm -rf "pr-$PR" && cp -r ../site "pr-$PR" && touch .nojekyll
+          git add -A
+          git commit -q -m "Storybook preview for PR #$PR" || exit 0
+          git push -q "$url" gh-pages
+      - name: Comment the link (once per PR)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request.number;
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            const url = `https://${owner}.github.io/${repo}/pr-${pr}/`;
+            const marker = '<!-- storybook-preview -->';
+            const comments = await github.paginate(github.rest.issues.listComments,
+              { owner, repo, issue_number: pr });
+            if (comments.some(c => c.body?.includes(marker))) return;
+            await github.rest.issues.createComment({ owner, repo, issue_number: pr,
+              body: `${marker}\nStorybook preview: ${url}\n(Updates on every push; may take a minute after the run.)` });
+
+  cleanup:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: storybook-preview-gh-pages
+      cancel-in-progress: false
+    steps:
+      - name: Remove gh-pages/pr-${{ github.event.pull_request.number }}
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git init -q pages && cd pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          git fetch -q --depth 1 "$url" gh-pages || exit 0
+          git checkout -q -B gh-pages FETCH_HEAD
+          [ -d "pr-$PR" ] || exit 0
+          git rm -rq "pr-$PR"
+          git commit -q -m "Remove Storybook preview for PR #$PR"
+          git push -q "$url" gh-pages

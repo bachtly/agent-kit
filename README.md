@@ -150,6 +150,7 @@ empty secrets, even though its job runs in the `agent` environment, and the toke
 | Comment `@agent ...` in a PR's Conversation tab | Run on the PR branch. Its inline review comments are included as `path:line` |
 | Comment inline on a feature's design doc, then `@agent approve` | Applies your changes to the doc, then implements it |
 | Open a `type:mockup` issue, then `agent` | Storybook stories with mock data for the screens, reviewed in the PR's Storybook preview (your app's CI publishes it). On approval, drafts the follow-up feature or epic issue |
+| Comment `@agent mockup` on any issue or PR | Storybook stories for the UI the task changes, one `Option A/B/...` story per open visual question |
 | Open a `type:epic` issue, then `agent` | Design doc → slice breakdown → slice issues that run by themselves → one big epic PR (see below) |
 
 Inline review comments don't trigger runs. Leave them, then post one `@agent address the review`.
@@ -162,6 +163,10 @@ Inline review comments don't trigger runs. Leave them, then post one `@agent add
 | Large feature, one PR is fine | `type:feature` | design doc, then the PR |
 | Large feature, built in parallel slices, one big PR | `type:epic` | design doc, slice list, then the epic PR |
 | Needs visual feedback first | `type:mockup` | the Storybook preview; then open a feature or epic |
+
+Any run whose open question changes the UI (and the app has Storybook) adds one story per option,
+named `Option A`, `Option B`, ..., and asks you to pick. To see them from the PR, add the preview
+workflow `templates/app-repo/.github/workflows/storybook-preview.yml` to the app (onboarding does).
 
 Every run researches its decisions on the web first (`web-research` skill) and lists queries and
 sources under Research in the state comment.

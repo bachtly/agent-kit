@@ -26,6 +26,8 @@ came from:
   actually runs. Prefer them when they differ from the other sources.
 - Existing `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `README.md` for architecture and rules.
 - Visibility: `gh repo view <owner/name> --json visibility,defaultBranchRef`.
+- Storybook: `.storybook/`, a `storybook`/`build-storybook` script in `package.json`. Note the build
+  script and whether CI already publishes a Storybook preview on PRs.
 
 If a command needs services the agent job won't have (database, Docker, cloud credentials), leave
 it out of the check command and say so.
@@ -74,6 +76,13 @@ On a branch `agent-kit-onboarding` in the target clone, add:
 - `.github/workflows/agent.yml` from `templates/app-repo/.github/workflows/agent.yml` (unchanged,
   except the fallback edits from step 4 if used)
 - the approved `CLAUDE.md` and `.claude/settings.json`
+- **If the app has Storybook and CI doesn't publish a preview yet:**
+  `.github/workflows/storybook-preview.yml` from `templates/app-repo/`, with the node version,
+  install step and Storybook build script set to match CI. Without it the owner can't see the
+  agent's mockup and `Option A/B` stories from the PR. It publishes to `gh-pages` under `pr-<N>/`:
+  tell the user to set Settings → Pages → Deploy from a branch → `gh-pages` / root after the first
+  run. No Pages (private repo on a free plan)? Delete its `publish` and `cleanup` jobs and use the
+  `storybook` artifact. The agent can't add this file itself (no Workflows permission).
 
 Commit, push, `gh pr create`. Then tell the user how to test after merging:
 
