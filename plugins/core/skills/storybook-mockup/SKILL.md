@@ -6,7 +6,8 @@ description: Use in any agent-kit run that builds Storybook stories for the owne
 # Storybook mockup
 
 The goal is fast visual feedback. The owner opens the PR's Storybook preview (published by the
-app's own CI), compares the options, and picks one in a comment.
+app's own CI), compares the options, and picks one in a comment. The preview is hosted on public GitHub Pages,
+so stories use mock data only: nothing private or confidential.
 
 When this applies:
 
@@ -56,7 +57,7 @@ When this applies:
 ## Output
 
 - `reply.md`: the story list (title → what it shows), then for each open question a table of
-  options (story title, what differs, your recommendation), and "Open the Storybook preview on the
+  options (story title, what differs, pros and cons, your recommendation), and "Open the Storybook preview on the
   PR, comment with your pick or changes (`@agent option B`, `@agent approve`)."
 - In the state comment, list each unanswered option question under Open questions.
 - `type:mockup` approval: in `reply.md`, draft the follow-up `type:feature` or `type:epic` issue

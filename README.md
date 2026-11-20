@@ -164,12 +164,15 @@ Inline review comments don't trigger runs. Leave them, then post one `@agent add
 | Large feature, built in parallel slices, one big PR | `type:epic` | design doc, slice list, then the epic PR |
 | Needs visual feedback first | `type:mockup` | the Storybook preview; then open a feature or epic |
 
-Any run whose open question changes the UI (and the app has Storybook) adds one story per option,
-named `Option A`, `Option B`, ..., and asks you to pick. To see them from the PR, add the preview
-workflow `templates/app-repo/.github/workflows/storybook-preview.yml` to the app (onboarding does).
+Every decision is made from at least two candidates, compared by web research (`web-research`
+skill); candidates, queries and sources go under Research in the state comment. When the decision
+is yours, `reply.md` lists every candidate with pros and cons and a recommendation, and asks you to
+pick.
 
-Every run researches its decisions on the web first (`web-research` skill) and lists queries and
-sources under Research in the state comment.
+UI decisions are shown, not described: if the app has Storybook, each candidate gets a story named
+`Option A`, `Option B`, ... The preview is hosted on public GitHub Pages (mock data only). To see it
+from the PR, add the preview workflow `templates/app-repo/.github/workflows/storybook-preview.yml`
+to the app (onboarding does).
 
 ## Epics
 

@@ -23,12 +23,13 @@ comment instead.
 
 ## Procedure
 
-1. Write down the question in one line, and the options you already see in the code.
+1. Write down the question in one line, and the candidates you already see in the code. Aim for
+   at least two; search for more if the code shows only one.
 2. Search with general wording: the problem, the stack, the current year when freshness matters.
    Mix an industry term, a plain wording, and an "X vs Y" or "best practice" query.
 3. Read the 2 to 5 most useful results: official docs, standards and maintainers' pages first,
    then well-known engineering blogs. Note vendor-only and undated sources as such.
-4. Decide. The deciding factor is the evidence plus this repo's existing patterns and `CLAUDE.md`.
+4. Compare the candidates: pros, cons and what the sources say about each. Then decide. The deciding factor is the evidence plus this repo's existing patterns and `CLAUDE.md`.
    The repo's conventions win over generic advice.
 
 ## Output
@@ -38,9 +39,16 @@ there is one):
 
 ```markdown
 - <question> → <chosen option>: <one-line reason>
+  - candidates: <A> (pro/con), <B> (pro/con)
   - queries: "<q1>", "<q2>", "<q3>"
   - sources: [<title>](<url>), [<title>](<url>)
 ```
+
+## When the owner must decide
+
+If the choice is the owner's to make, don't just pick. Put the candidates in `reply.md` with pros
+and cons (a table, one row per candidate), your recommendation and the sources. For UI candidates,
+also build one `Option A/B/...` story each (`storybook-mockup` skill).
 
 ## Safety (hard rules)
 
