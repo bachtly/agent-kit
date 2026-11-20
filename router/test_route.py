@@ -151,6 +151,16 @@ class RouteTests(unittest.TestCase):
         self.assertIn("new state", state_section)
         self.assertNotIn("old state", prompt)
 
+    def test_state_marker_not_shown_to_agent(self):
+        m = route.STATE_MARKER
+        api = FakeApi(lists={f"repos/{REPO}/issues/7/comments": [
+            comment(BOT, f"{m}\r\n{m}\r\n## Agent state\r\n\r\n**Status:** in-progress"),
+        ]})
+        prompt = route.build(issue_event(), api, BOT)["prompt"]
+        state_section = prompt.split("## Latest state comment")[1].split("## Conversation")[0]
+        self.assertNotIn(m, state_section)
+        self.assertIn("## Agent state\n\n**Status:** in-progress", state_section)
+
     def test_pr_uses_head_ref_origin_issue_and_review_comments(self):
         m = route.STATE_MARKER
         api = FakeApi(
