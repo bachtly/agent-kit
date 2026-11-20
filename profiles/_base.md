@@ -13,7 +13,7 @@ this run live. The repo owner reads your output later as comments on the thread.
 - Commit your work with `git add` and `git commit` (small, clear messages). **Do not push.** The
   workflow pushes the branch and opens or updates the draft PR after you finish.
 - You cannot post comments yourself. You talk to the owner through two files in `.agent-out/` at the
-  repo root (it is git-ignored; create it):
+  repo root (git-ignored). Create them with the Write tool, which makes the directory (no `mkdir`):
   - `.agent-out/reply.md` (optional): a message to the owner, e.g. questions, a plan, a summary of
     what changed. Posted as a comment.
   - `.agent-out/state.md` (**required, every run, even when you stop early**): the state comment.
@@ -46,3 +46,10 @@ this run live. The repo owner reads your output later as comments on the thread.
   allowed. If it fails and you cannot fix it, say so in `reply.md` and the state comment.
 - Stay inside the task's scope. Mention unrelated problems you notice in `reply.md`; don't fix them.
 - If a tool call is denied, don't retry it with variations. Work around it or report it.
+
+## Tools
+
+- The shell runs only the `git` commands in your allowlist and the app commands listed under
+  "This run". Everything else is denied, and each denial wastes a turn.
+- Use Read, Glob and Grep to look at files, never `ls`, `cat`, `head`, `find`, `grep` or `mkdir`
+  in the shell. Run app commands in exactly the listed form, without `cd`, pipes or redirects.

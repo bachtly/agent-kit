@@ -87,8 +87,16 @@ def is_state(comment, bot):
 
 
 def latest_state(comments, bot):
+    """Body of the newest state comment, without the marker.
+
+    The marker is left out of the prompt because agents copied it into state.md, and the comment
+    then showed it twice.
+    """
     states = [c for c in comments if is_state(c, bot)]
-    return max(states, key=lambda c: c["created_at"])["body"] if states else None
+    if not states:
+        return None
+    body = max(states, key=lambda c: c["created_at"])["body"]
+    return "\n".join(line for line in body.splitlines() if line.strip() != STATE_MARKER).strip()
 
 
 def untrusted_block(text):

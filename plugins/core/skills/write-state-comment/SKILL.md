@@ -8,7 +8,8 @@ description: Use at the end of every agent-kit run, including runs that stop ear
 The next run starts with no memory. This file is everything it will know about the work so far,
 besides the conversation. Write it for that reader: precise, short, no narrative.
 
-Write it to `.agent-out/state.md` (create the directory if needed). The workflow adds the
+Write it to `.agent-out/state.md` with the Write tool, which creates the directory. Don't run
+`mkdir` or any shell command for it: those are denied. The workflow adds the
 `<!-- agent-state -->` marker and posts it, so don't add the marker yourself. Use exactly this
 structure:
 
