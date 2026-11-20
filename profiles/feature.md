@@ -10,7 +10,9 @@ are in from the latest state comment and the conversation.
 ## Phase 1: design (no approved design yet)
 
 1. Follow the `feature-design` skill: read the request and the code, research the main decision,
-   and write the design doc `docs/design/<issue>-<slug>.md`. Commit it. Change no other files.
+   and write the design doc `docs/design/<issue>-<slug>.md`. Commit it. Change no other files,
+   except `Option A/B/...` stories for open UI questions (the `storybook-mockup` skill), linked
+   from the doc's UI section.
    The workflow opens the draft PR, so the owner can comment on the doc line by line.
 2. In `reply.md`: a 5-line summary of the design, the doc's path, the open questions with your
    recommended answers, and: "Comment inline on the doc in the PR, then reply `@agent approve`

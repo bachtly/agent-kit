@@ -10,6 +10,7 @@ Bug fixes: find the root cause, prove it with a test, fix it.
 2. Write a failing test that captures the bug, if the repo has tests for that area.
 3. Fix it with the smallest change that addresses the root cause. Run the check command.
 4. Commit. In `reply.md`, give the root cause in one or two sentences, the fix, and the test that covers it.
+   If the fix changes the UI and has a real alternative, add the option stories as `_base.md` says.
 5. Write the state comment with status `ready-for-review`.
 
 If you cannot reproduce the bug or locate the cause, don't guess at a fix. Report what you checked

@@ -150,6 +150,7 @@ empty secrets, even though its job runs in the `agent` environment, and the toke
 | Comment `@agent ...` in a PR's Conversation tab | Run on the PR branch. Its inline review comments are included as `path:line` |
 | Comment inline on a feature's design doc, then `@agent approve` | Applies your changes to the doc, then implements it |
 | Open a `type:mockup` issue, then `agent` | Storybook stories with mock data for the screens, reviewed in the PR's Storybook preview (your app's CI publishes it). On approval, drafts the follow-up feature or epic issue |
+| Comment `@agent mockup` on any issue or PR | Storybook stories for the UI the task changes, one `Option A/B/...` story per open visual question |
 | Open a `type:epic` issue, then `agent` | Design doc → slice breakdown → slice issues that run by themselves → one big epic PR (see below) |
 
 Inline review comments don't trigger runs. Leave them, then post one `@agent address the review`.
@@ -163,8 +164,15 @@ Inline review comments don't trigger runs. Leave them, then post one `@agent add
 | Large feature, built in parallel slices, one big PR | `type:epic` | design doc, slice list, then the epic PR |
 | Needs visual feedback first | `type:mockup` | the Storybook preview; then open a feature or epic |
 
-Every run researches its decisions on the web first (`web-research` skill) and lists queries and
-sources under Research in the state comment.
+Every decision is made from at least two candidates, compared by web research (`web-research`
+skill); candidates, queries and sources go under Research in the state comment. When the decision
+is yours, `reply.md` lists every candidate with pros and cons and a recommendation, and asks you to
+pick.
+
+UI decisions are shown, not described: if the app has Storybook, each candidate gets a story named
+`Option A`, `Option B`, ... The preview is hosted on public GitHub Pages (mock data only). To see it
+from the PR, add the preview workflow `templates/app-repo/.github/workflows/storybook-preview.yml`
+to the app (onboarding does).
 
 ## Epics
 
