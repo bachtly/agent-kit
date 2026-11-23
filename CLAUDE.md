@@ -1,8 +1,8 @@
 # agent-kit
 
 Central repo for an unattended issue-to-PR agent on `anthropics/claude-code-action@v1`.
-App repos call `.github/workflows/agent.yml` (`workflow_call`) pinned at `@v1`. Read README.md for
-the architecture and run lifecycle.
+App repos call `.github/workflows/agent.yml` (`workflow_call`) pinned at `@v1`. Read README.md and
+docs/how-it-works.md for the architecture and run lifecycle.
 
 ## Check command
 

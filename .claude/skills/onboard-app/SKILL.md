@@ -66,7 +66,7 @@ scripts/onboard-repo.sh --repo <owner/name> --client-id <id> --key-file <path.pe
 
 Add `--require-review` only if the user wants to approve every run. Add `--no-environment` only if environment creation fails
 on a private repo (plan limitation). Then the caller must use `environment: ''` and
-`secrets: inherit` (see README). Never echo, cat or log secret values or the key file. The
+`secrets: inherit` (see `docs/setup.md`). Never echo, cat or log secret values or the key file. The
 script reads them from env/file and pipes them to `gh`.
 
 ## 5. Open the PR in the target repo
