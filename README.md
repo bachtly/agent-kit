@@ -1,242 +1,177 @@
 # agent-kit
 
-An unattended issue-to-PR agent for your GitHub repos, built on
-[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action).
+**Label a GitHub issue `agent`, get a draft PR back.** An unattended issue-to-PR agent for your
+repos, built on [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action).
+
+[![ci](https://github.com/bachtly/agent-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/bachtly/agent-kit/actions/workflows/ci.yml)
+[![last commit](https://img.shields.io/github/last-commit/bachtly/agent-kit)](https://github.com/bachtly/agent-kit/commits/main)
+[![built on claude-code-action](https://img.shields.io/badge/built%20on-claude--code--action-d97757)](https://github.com/anthropics/claude-code-action)
+
+![A real agent run on bachtly/daily-kaizen: issue #123 labeled type:chore, a 1m22s Actions run, the agent's reply and state comment, and draft PR #124 from agent/issue-123](assets/hero-agent-run.svg)
+
+<sub>Real `gh` output from [daily-kaizen#123](https://github.com/bachtly/daily-kaizen/issues/123) → [PR #124](https://github.com/bachtly/daily-kaizen/pull/124), captured from live commands.</sub>
+
+## What it is
 
 You label an issue `agent`. A GitHub Actions run picks it up, Claude works on a branch, the
 workflow opens a draft PR, and the agent reports back with comments. To steer it, comment
-`@agent ...` on the issue or the PR. No servers and no long-lived sessions.
+`@agent ...` on the issue or the PR. There are no servers and no long-lived sessions: every run is
+a fresh Actions job that rebuilds its context from the thread.
 
 This repo holds the whole pipeline. Each app repo adds one ~15-line caller workflow plus its own
 `CLAUDE.md` and `.claude/settings.json`.
 
-## Architecture
+## Features
 
-```
-app repo                                   agent-kit (this repo, pinned @v1)
-────────                                   ─────────────────────────────────
-issue labeled `agent` / `@agent` comment
-  └─ .github/workflows/agent.yml  ───────▶ .github/workflows/agent.yml (workflow_call)
-     (caller: owner-only `if`)               ├─ router/route.py   event → prompt + claude args
-                                             ├─ profiles/*.md     per-type steps, model, tools
-     CLAUDE.md, .claude/settings.json        ├─ plugins/core      shared skills (plugin marketplace)
-     (app context + allowed commands)        └─ claude-code-action runs Claude in the app checkout
-```
+| | |
+|---|---|
+| **Issue types** | `type:bug`, `chore`, `feature`, `mockup`, `epic`, each a profile with its own steps, model, turn cap and tool allowlist |
+| **Design gates** | Features commit a design doc to the draft PR and wait for `@agent approve` before implementing |
+| **Epics** | A big feature is split into slice issues that run in parallel and merge into one epic PR you review |
+| **Mockups** | Storybook stories with mock data, one `Option A/B/...` story per open visual question |
+| **Continuity** | A state comment (`<!-- agent-state -->`) carries plan, decisions and next step from run to run |
+| **Locked down** | The agent only gets a read-only token; workflow steps do every write with a short-lived GitHub App token |
+| **Owner-only** | Only the repo owner's label or `@agent` comment starts a run; only owner and bot comments reach the prompt |
+| **Shared skills** | `plugins/core` ships as a Claude Code plugin marketplace: design, slicing, mockups, web research, state |
 
-Configuration has two axes:
+## Quickstart
 
-| Axis | Selected by | Lives in | Controls |
-|---|---|---|---|
-| Type | `type:<name>` label (default `chore`) | `profiles/<name>.md` | steps, model, max turns, tool allowlist, extra plugins |
-| App | the repo itself | app's `CLAUDE.md`, `.claude/settings.json` | check command, architecture, do-nots, allowed test/lint commands |
-
-Shared skills ship as a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`,
-`plugins/core`). Each run loads it from the local checkout at `.agent-kit/`.
-
-### Continuity without sessions
-
-Every trigger is a fresh run. The router rebuilds context from the thread: the issue/PR body,
-the latest **state comment** (`<!-- agent-state -->`, written by the agent at the end of every
-run: status, branch/PR, plan, decisions, open questions, next step), owner and bot comments,
-and inline review comments for PRs. For a PR on `agent/issue-<N>`, it also reads issue N's
-comments, so state carries over from issue to PR.
-
-### Ask or proceed
-
-The agent asks 1-3 questions and stops only when a wrong guess would waste the run. Otherwise
-it states its assumption and proceeds. `type:feature` runs in two phases: commit a design doc
-(`docs/design/<issue>-<slug>.md`) to the draft PR and stop, so you can comment on it line by line,
-then implement after you reply `@agent approve` (or with changes).
-
-## Run lifecycle
-
-1. **Trigger.** An `issues: labeled` event (label `agent`) or an `issue_comment: created` event
-   containing `@agent`. Only the repo owner's events pass the `if`, which also stops the bot's own
-   comments from looping. The one exception is the App labeling its own epic slice issues `agent`
-   (see [Epics](#epics)). Both event types run from the default branch.
-2. **Concurrency.** One run at a time per repo and issue/PR number. Later runs queue; nothing is
-   cancelled.
-3. **Steps:**
-   1. Mint a GitHub App token (expires in 1 hour).
-   2. Add `agent:working`, remove `agent` and `agent:failed`, react 👀 to the comment.
-   3. Check out the app repo (full history), then agent-kit into `.agent-kit/` (git-excluded).
-   4. Route: pick the profile and build the prompt, the `claude_args` and the plugin list.
-   5. Check out `agent/issue-<N>` (or the PR's head branch), or create it, with the bot's git identity.
-      Install the app's toolchain if the caller asks (`node_version`, `python_version`,
-      `dotnet_version`, `setup_command`, e.g. `npm ci`).
-   6. Run claude-code-action. Claude edits and commits. It can't push or comment. It writes
-      `.agent-out/reply.md` and `.agent-out/state.md` instead.
-   7. Push the branch (refused if it touches `.github/workflows/`), open a draft PR if none
-      exists, and post the reply and the state comment.
-   8. Always remove `agent:working`. On failure, add `agent:failed` and comment the run URL.
-
-## Security model
-
-- **GitHub App token for every write** (not `GITHUB_TOKEN`, not a PAT). CI runs on the agent's
-  PRs, and tokens expire after an hour. The App has Contents RW, Issues RW, Pull requests RW,
-  Metadata R and **no Workflows permission**, so it cannot push workflow changes even if asked.
-- **The agent never holds a write token.** claude-code-action gets the job's `GITHUB_TOKEN`,
-  which is `contents: read`. The App token is used only by the workflow's own steps, through a
-  one-shot git credential helper, so it is never written to `.git/config`.
-- **Tool allowlists** come from the profile (file tools plus `git status/diff/log/add/commit/mv/rm`)
-  and the app's `.claude/settings.json` (its test/lint commands). The router reads that file from the
-  default branch, before the agent's branch is checked out, and passes its `Bash(...)` allow rules as
-  `--allowedTools` and all its deny rules as `--disallowedTools` (claude-code-action doesn't reliably
-  apply the repo's own settings). Rules the kit forbids are dropped with a warning. They never include `Bash(*)`,
-  `gh`, `curl` or `git push`, and the router rejects `Bash`, `Bash(*)` and `gh api` in profiles.
-- **Web tools** are added by the router, never by a profile (it rejects `WebSearch`/`WebFetch` in
-  `allowed_tools`). `WebSearch` is on for every run: it sends only query text. `WebFetch` can carry
-  data out in a URL, so it is on only when the event says the repo is public. The `web-research`
-  skill forbids repo content in queries or URLs and treats fetched pages as untrusted data.
-  `--permission-mode default` denies anything not allowed.
-- **Trust filter.** Only comments from the repo owner and the App bot reach the prompt. The issue
-  body is wrapped as untrusted data. Only the bot's comments count as state.
-- **Secrets** sit in an `agent` environment that only the default branch may deploy to. Never put
-  deploy or cloud credentials in this job.
-- **Public repos:** only the owner's label or `@agent` comment starts a run (the caller's `if:`), so
-  runs start without approval. Use a separate Anthropic Console workspace key with a monthly spend
-  limit, and switch on GitHub interaction limits during floods. For a manual approval gate on every
-  run, use `scripts/onboard-repo.sh --require-review` (adds you as required reviewer).
-
-## One-time setup
-
-1. **Create the GitHub App** (Settings → Developer settings → GitHub Apps → New):
-   - Name, e.g. `bachtly-agent`. Homepage: this repo. **Webhook: off.**
-   - Repository permissions: Contents **Read & write**, Issues **Read & write**, Pull requests
-     **Read & write**, Metadata **Read**. Leave Workflows at *No access*.
-   - Where can it be installed: *Only on this account*.
-   - After creating it, note the **Client ID** and generate a **private key** (.pem). Keep the file
-     outside any repo.
-2. **Claude credentials:** run `claude setup-token` to get `CLAUDE_CODE_OAUTH_TOKEN` (uses your
-   Claude subscription), or create an `ANTHROPIC_API_KEY` in the Console.
-3. **Tag this repo:** `git tag v1 && git push origin v1`. Callers use `@v1`. To roll out a change,
-   move the tag: `git tag -f v1 && git push -f origin v1`.
-4. **Onboard each app repo** with the `onboard-app` skill (ask Claude Code: "onboard
-   owner/repo"), or by hand with [ONBOARDING.md](ONBOARDING.md).
-
-### Secrets and variables (per app repo)
-
-| Name | Kind | Where | Value |
-|---|---|---|---|
-| `AGENT_APP_CLIENT_ID` | variable | repo | GitHub App Client ID |
-| `AGENT_APP_PRIVATE_KEY` | secret | `agent` environment | App private key (.pem contents) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | secret | `agent` environment | from `claude setup-token` (set this or the next one) |
-| `ANTHROPIC_API_KEY` | secret | `agent` environment | Console API key (recommended for public repos, with a spend limit) |
-
-The `agent` environment has a deployment branch policy that allows only the default branch. With
-`--require-review` it also has you as required reviewer, so every run waits for your approval.
-
-The caller must pass `secrets: inherit` (the template does). Without it the reusable workflow sees
-empty secrets, even though its job runs in the `agent` environment, and the token step fails with
-"The 'private-key' input must be set to a non-empty string".
-
-**Fallback (no environments for private repos on your plan):** run the script with
-`--no-environment` to store them as repo secrets, and change the caller to:
+Once the GitHub App and secrets exist ([setup](docs/setup.md), or ask Claude Code in this repo to
+"onboard owner/repo"), add this caller to the app repo as `.github/workflows/agent.yml`
+(from [`templates/app-repo`](templates/app-repo/.github/workflows/agent.yml)):
 
 ```yaml
+name: agent
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+jobs:
+  agent:
+    # Owner events, plus the App starting a slice run of an epic (the kit re-checks it is this App).
+    if: >-
+      (github.event.sender.login == github.repository_owner &&
+       (github.event.label.name == 'agent' || contains(github.event.comment.body, '@agent'))) ||
+      (github.event.sender.type == 'Bot' && github.event.label.name == 'agent' &&
+       contains(github.event.issue.labels.*.name, 'type:slice'))
     uses: bachtly/agent-kit/.github/workflows/agent.yml@v1
+    secrets: inherit
     with:
       app_client_id: ${{ vars.AGENT_APP_CLIENT_ID }}
-      environment: ''
-    secrets: inherit
+      # node_version: "24"
+      # setup_command: npm ci
 ```
 
-## Using it
+Then open an issue, add `type:chore` and `agent`, and watch for a draft PR from `agent/issue-<N>`.
 
-| You do | Agent does |
-|---|---|
-| Open an issue, add `type:bug`/`type:feature`/`type:chore`, then `agent` | Works it on `agent/issue-<N>` and opens a draft PR |
-| Comment `@agent <instruction>` on the issue | Follow-up run on the same branch |
-| Comment `@agent ...` in a PR's Conversation tab | Run on the PR branch. Its inline review comments are included as `path:line` |
-| Comment inline on a feature's design doc, then `@agent approve` | Applies your changes to the doc, then implements it |
-| Open a `type:mockup` issue, then `agent` | Storybook stories with mock data for the screens, reviewed in the PR's Storybook preview (your app's CI publishes it). On approval, drafts the follow-up feature or epic issue |
-| Comment `@agent mockup` on any issue or PR | Storybook stories for the UI the task changes, one `Option A/B/...` story per open visual question |
-| Open a `type:epic` issue, then `agent` | Design doc → slice breakdown → slice issues that run by themselves → one big epic PR (see below) |
+## How it works
 
-Inline review comments don't trigger runs. Leave them, then post one `@agent address the review`.
+```mermaid
+flowchart TD
+    A["Owner labels issue <code>agent</code><br/>or comments <code>@agent ...</code>"] --> B["App repo caller workflow<br/>owner-only <code>if:</code>"]
+    B --> C["agent-kit <code>agent.yml@v1</code><br/>mint App token, add <code>agent:working</code>"]
+    C --> D["Check out app repo<br/>and agent-kit into <code>.agent-kit/</code>"]
+    D --> E["<code>router/route.py</code><br/>pick profile, build prompt + allowed tools"]
+    E --> F["Check out or create<br/><code>agent/issue-N</code>"]
+    F --> G["claude-code-action<br/>read-only token: edits, commits,<br/>writes reply.md + state.md"]
+    G --> H["Workflow step, App token:<br/>push, open draft PR,<br/>post reply + state comment"]
+    H --> I{"Owner reviews"}
+    I -- "@agent ..." --> B
+    I -- merge --> J["Done"]
+```
 
-## Which type to use
+Each run is stateless. The router reads the issue/PR body, the latest state comment, owner and bot
+comments and inline review comments, so the next run picks up where the last one stopped. Full
+lifecycle, security model and limits: [docs/how-it-works.md](docs/how-it-works.md).
 
-| Work | Label | Your gates |
+## Architecture
+
+```mermaid
+flowchart TB
+    owner(["Repo owner"])
+
+    subgraph app["App repo"]
+        caller["Caller workflow<br/><code>.github/workflows/agent.yml</code>"]
+        appctx["<code>CLAUDE.md</code> + <code>.claude/settings.json</code><br/>check command, allowed commands"]
+    end
+
+    subgraph kit["agent-kit, pinned @v1"]
+        wf["Reusable workflow<br/><code>.github/workflows/agent.yml</code><br/>owns every GitHub write"]
+        router["Router<br/><code>router/route.py</code>"]
+        profiles["Profiles<br/><code>profiles/_base.md</code> + <code>profiles/type.md</code>"]
+        plugins["Plugin marketplace<br/><code>plugins/core</code> skills"]
+        slices["Epic slices<br/><code>router/slices.py</code>"]
+        onboard["<code>scripts/onboard-repo.sh</code><br/>+ <code>templates/app-repo/</code>"]
+    end
+
+    action["claude-code-action<br/>read-only <code>github.token</code>"]
+    claude[("Claude<br/>OAuth token or API key")]
+    gh[("GitHub API<br/>issues, PRs, labels")]
+
+    owner -- "label / @agent" --> caller
+    caller -- "workflow_call" --> wf
+    wf -- "1 runs" --> router
+    profiles -- "steps, model, tools" --> router
+    appctx -- "allow/deny rules" --> router
+    router -- "2 prompt, claude_args, plugins" --> action
+    plugins -- skills --> action
+    action <--> claude
+    wf -- "3 App token: push, PR, comments" --> gh
+    wf -- "4 epics only" --> slices
+    slices -- "slice issues, merges" --> gh
+    onboard -. "labels, environment, secrets, files" .-> app
+```
+
+| Piece | Stack | Runs on |
 |---|---|---|
-| Bug, colour or theme tweak, button, scrolling | `type:bug` / `type:chore` | the PR |
-| Large feature, one PR is fine | `type:feature` | design doc, then the PR |
-| Large feature, built in parallel slices, one big PR | `type:epic` | design doc, slice list, then the epic PR |
-| Needs visual feedback first | `type:mockup` | the Storybook preview; then open a feature or epic |
+| Reusable workflow | GitHub Actions (`workflow_call`) | GitHub-hosted `ubuntu-latest`, in the app repo's Actions |
+| Router, slices | Python 3, stdlib only, `gh` CLI | The same job |
+| Agent | `anthropics/claude-code-action@v1`, Claude Code plugins | The same job, in the app checkout |
+| Auth | GitHub App token (1 h) for writes, `github.token` (read) for the agent | Secrets in an `agent` environment, default branch only |
+| Setup | Bash + `gh` (`scripts/onboard-repo.sh`) | Your machine, once per app repo |
 
-Every decision is made from at least two candidates, compared by web research (`web-research`
-skill); candidates, queries and sources go under Research in the state comment. When the decision
-is yours, `reply.md` lists every candidate with pros and cons and a recommendation, and asks you to
-pick.
+## Gallery
 
-UI decisions are shown, not described: if the app has Storybook, each candidate gets a story named
-`Option A`, `Option B`, ... The preview is hosted on public GitHub Pages (mock data only). To see it
-from the PR, add the preview workflow `templates/app-repo/.github/workflows/storybook-preview.yml`
-to the app (onboarding does).
+<details>
+<summary>Workflow steps, tests and setup script (real output)</summary>
 
-## Epics
+The steps of the run above, as recorded by GitHub Actions. Steps for epics, slices and failures were skipped:
 
-For a feature too big for one PR, where you still want to review one PR at the end.
+![Steps of Actions run 44690079807: token, sender check, checkouts, Route, branch, setup-node, Run Claude, Push/open draft PR, remove working label](assets/run-steps.svg)
 
-```
-#10 epic issue (type:epic)  →  #50 epic PR  agent/issue-10 → main      ← you review this
-                                 ├─ #51 slice PR  agent/issue-11 → agent/issue-10  (merged by the workflow)
-                                 ├─ #52 slice PR  agent/issue-12 → agent/issue-10  (merged by the workflow)
-                                 └─ #53 slice PR  agent/issue-13 → agent/issue-10  (after #11, #12)
-```
+The router test suite (41 tests, also run by CI):
 
-1. **Design.** The first run commits `docs/design/<issue>-<slug>.md` to the epic's draft PR. Comment
-   inline, then `@agent approve`.
-2. **Breakdown.** The next run commits `docs/design/<issue>-slices.json` (the `slice-plan` skill).
-   Comment, then `@agent approve`.
-3. **Slices.** The next run hands the list to the workflow (`router/slices.py create`). It validates
-   it (at most 12 slices, only `id`, `title`, `body`, `depends_on`, dependencies on earlier slices
-   only), creates one `type:slice` issue per slice, and labels the ones without dependencies `agent`.
-   Each slice branches from the epic branch and opens a PR into it.
-4. **Merge.** When a slice run ends `ready-for-review`, the workflow merges its PR into the epic
-   branch (merge commit), closes the slice issue, and starts the slices whose dependencies are now
-   all merged. Slices without a dependency between them run in parallel.
-5. **Review.** When every slice is in, the workflow marks the epic PR ready and comments on the
-   epic. Review the whole feature there; each slice PR stays linked from its issue for tracing back.
-   `@agent ...` on the epic PR makes changes on the epic branch.
+![python -m unittest discover -s router -v: 41 tests, OK](assets/router-tests.svg)
 
-Only the workflow starts slice runs: the App labels its own slice issues. The caller's `if:` allows
-that one bot event, and the kit checks the sender is this App and the issue its own slice.
-**Existing callers:** copy the new `if:` from `templates/app-repo/.github/workflows/agent.yml`, or
-slices are created but never start. If a slice PR conflicts with slices merged before it, the
-workflow comments on the slice; reply `@agent merge the epic branch and resolve the conflicts`.
+The per-repo setup script:
 
-## Extending
+![scripts/onboard-repo.sh --help usage text](assets/onboard-help.svg)
 
-- **New issue type:** add `profiles/<name>.md` with frontmatter (`model`, `max_turns`,
-  `allowed_tools`, optional `plugins`), add the `type:<name>` label to `scripts/onboard-repo.sh`,
-  and re-run it on your repos.
-- **New shared skill:** add `plugins/core/skills/<skill>/SKILL.md`.
-- **Stack plugin (e.g. dotnet):** add `plugins/<name>/.claude-plugin/plugin.json` and its skills,
-  register it in `.claude-plugin/marketplace.json`, and list it in a profile's `plugins:`
-  frontmatter. Profiles are shared by all repos, so stack plugins suit profiles like `dotnet-bug`.
-- **App-specific behaviour:** goes in that app's `CLAUDE.md` and `.claude/settings.json`, not here.
+</details>
 
-## Limits
+## Docs
 
-- Comments only. Inline PR review comments and reviews don't trigger runs.
-- The agent can't change `.github/workflows/` (no Workflows permission; the push step refuses).
-- Fork PRs are refused.
-- One run's work is capped by the profile's `max_turns` and the job timeout (default 60 min).
-  Bigger tasks continue over several `@agent continue` runs through the state comment.
-- The conversation in the prompt is capped (~60 KB). The oldest comments are dropped first, and
-  the state comment is always kept.
-- `kit_ref` (default `v1`) must match the tag in the caller's `uses:`. A reusable workflow cannot
-  see its own ref.
-- Commands that need services (databases, Docker, cloud) aren't available unless the app's own setup
-  provides them inside the job.
+- [docs/setup.md](docs/setup.md): one-time GitHub App and credentials setup, per-repo secrets, the no-environment fallback
+- [ONBOARDING.md](ONBOARDING.md): checklist for onboarding an app repo (or ask Claude Code: "onboard owner/repo")
+- [docs/usage.md](docs/usage.md): what to label and comment, which type to pick, epics
+- [docs/how-it-works.md](docs/how-it-works.md): run lifecycle, continuity, security model, limits, extending the kit
+- [CLAUDE.md](CLAUDE.md): map of the repo and the invariants changes must keep
 
-## Development
+## Contributing
+
+Run the same checks as CI (`.github/workflows/ci.yml`) before a PR:
 
 ```sh
-python -m unittest discover -s router -v
-shellcheck scripts/*.sh
-actionlint
+python -m unittest discover -s router -v && shellcheck scripts/*.sh && actionlint
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same three on every push and PR. See [CLAUDE.md](CLAUDE.md).
+Add a router test for every behaviour change, and read the invariants in [CLAUDE.md](CLAUDE.md).
+Changes reach app repos when the `v1` tag moves; breaking changes to the caller interface need
+`v2` and a migration note here.
+
+## License
+
+No license file yet, so default copyright applies. Ask the owner before reusing the code.

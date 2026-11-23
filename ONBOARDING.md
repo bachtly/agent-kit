@@ -22,7 +22,7 @@ repo and say "onboard owner/repo". Keep this file and the skill in sync.
       ```
       It creates the labels, the `agent` environment (default branch only, plus you as required
       reviewer with `--require-review`), the `AGENT_APP_CLIENT_ID` variable and the environment secrets.
-      If environments aren't available on your plan, use `--no-environment` and the README fallback caller.
+      If environments aren't available on your plan, use `--no-environment` and the fallback caller in `docs/setup.md`.
 - [ ] **Open a PR in the app repo** adding `.github/workflows/agent.yml` (from
       `templates/app-repo/`, with `node_version`/`python_version`/`dotnet_version` and
       `setup_command` set to match CI), `CLAUDE.md` and `.claude/settings.json`. If the app has
